@@ -1,175 +1,129 @@
-# Smart Meter Test Project
+# ⚡ Real-Time Smart Meter Logger & Live Dashboard
 
-A practical toolkit for polling a Modbus-capable smart meter over USB/RS485, logging register data into CSV, and performing daily analysis with summaries and plots.
+This project is a resilient, real-time energy monitoring system designed to log data from a Modbus-enabled smart meter, store it in a local SQLite database, and visualize the findings on an interactive web dashboard. It was developed to analyze and understand the detailed power consumption patterns of a university lab environment.
 
-## Project layout
-
-smart-meter-test/
-├── main.py          # Primary logger (auto-detect port, logs to master CSV)
-├── dump.py          # Register explorer (scans registers, word orders, scaling)
-├── analyzer.py      # Analyzer (daily summaries, anomalies, plots per meter/day)
-├── config.json      # Config file (registers, slave IDs, logging settings)
-├── requirements.txt # Python dependencies
-├── runner.sh        # Wrapper: runs main.py, then analyzer.py automatically
-├── log_files/       # Generated CSV logs + plots
-│   ├── meter_log_master.csv   # Master log (all meters, all dates)
-│   ├── daily_summary.csv      # Auto-generated daily summary
-│   ├── anomalies.csv          # Auto-detected anomalies
-│   └── plots/                 # Auto-saved plots (PNG)
-└── venv/            # Virtual environment (not checked in)
+The system runs as a robust background service on Ubuntu Linux, capable of automatically recovering from power outages and system reboots, ensuring continuous and reliable data collection.
 
 
 
-## Requirements
+---
 
-- Python 3.8+ (tested on Python 3.10, macOS/Linux/Windows)
-- Virtual environment recommended
+## Features
 
-Python Packages
+-   **Real-Time Logging:** Captures data at a configurable interval (currently 2 seconds) from a single-phase smart meter via the Modbus RTU protocol.
+-   **Resilient Operation:** Runs as a `systemd` service, automatically restarting on boot or after a power failure, providing a true "set it and forget it" logging solution.
+-   **Efficient Database Storage:** Uses a local SQLite database (`smart_meter.db`) for fast, reliable, and long-term storage of time-series data.
+-   **Live Interactive Dashboard:** A web-based dashboard built with Streamlit that auto-refreshes to display:
+    -   Live readings for Power, Voltage, Current, and Frequency.
+    -   Key performance indicators (KPIs) for daily, weekly, and monthly energy consumption (kWh).
+    -   Historical charts showing daily usage trends and average power draw by the hour.
 
-pyserial (serial comms)
-pymodbus (Modbus helper, optional)
-pandas (data analysis)
-matplotlib (plots)
-jupyter (optional, for notebooks)
+---
 
-Create a .txt file(requirements.txt) and paste the above packages in that file, these will be installed later.
+## System Architecture
 
-Install inside venv:
+The project consists of two primary, independent components that communicate through the central database:
 
-python -m venv venv
-source venv/bin/activate      # macOS / Linux
-.\venv\Scripts\activate       # Windows
+1.  **The Logger (`main.py`):** A persistent background `systemd` service that continuously polls the smart meter. It's responsible for handling the Modbus communication, decoding the data, and writing every new reading into the SQLite database.
+2.  **The Database (`smart_meter.db`):** A single SQLite file that acts as the central data store. It decouples the logger from the dashboard, allowing either to be restarted without affecting the other.
+3.  **The Dashboard (`dashboard.py`):** A Streamlit web application that reads data from the database. It performs on-the-fly analysis and visualization, providing an interactive, near-real-time view of the lab's energy consumption.
 
+---
+
+## Tech Stack
+
+-   **Hardware:** Single-Phase Modbus Smart Meter, USB-to-RS485 Converter (CH340 chipset).
+-   **Backend:** Python, `pyserial` for hardware communication, SQLite3 for data storage.
+-   **Dashboard:** Streamlit, Pandas for data manipulation, Plotly for interactive charts.
+-   **Deployment:** `systemd` on Ubuntu Linux for robust background service management.
+
+---
+
+## Getting Started
+
+Follow these steps to set up and run the project on a new Ubuntu machine.
+
+### 1. Prerequisites
+
+Your user must have permission to access serial devices. Run this command, then **log out and log back in**.
+```bash
+sudo usermod -a -G $USER dialout
+```
+
+### 2. Clone & Setup
+
+Clone this repository and set up the Python virtual environment.
+```bash
+git clone [https://github.com/El3cTr0n1x/smart-meter-logger.git](https://github.com/El3cTr0n1x/smart-meter-logger.git)
+cd smart-meter-logger
+
+# Create and activate the virtual environment
+python3 -m venv venv
+source venv/bin/activate
+
+# Install all required libraries
 pip install -r requirements.txt
+```
 
+### 3. Configure the Logger Service
 
-# System-level (for USB–RS485)
+The logger is designed to run as a `systemd` service for maximum reliability.
 
-macOS
-brew install libusb
+**a. Create the Service File:**
+```bash
+sudo nano /etc/systemd/system/smart-meter-logger.service
+```
 
-Linux (Debian/Ubuntu)
-sudo apt update
-sudo apt install libusb-1.0-0
+**b. Paste the following configuration.** The paths are already set for the user `mars`. If your username or project path is different, you must update them here.
+```ini
+[Unit]
+Description=Smart Meter Logger Service
+After=network.target
 
-Windows
+[Service]
+User=mars
+Group=dialout
+WorkingDirectory=/home/mars/SMART_METER
+ExecStart=/home/mars/SMART_METER/venv/bin/python3 /home/mars/SMART_METER/main.py
+Restart=always
+RestartSec=10
 
-Use Zadig to install a WinUSB/libusb driver for your USB–serial adapter:
-Download Zadig.
-Plug in your meter cable.
-Options → List All Devices.
-Choose your device; pick WinUSB/libusb and install.
-For CH340/CP210x/FTDI adapters, ensure the driver is installed.
+[Install]
+WantedBy=multi-user.target
+```
 
-# Configuration
+**c. Enable and Start the Service:**
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable smart-meter-logger.service
+sudo systemctl start smart-meter-logger.service
+```
 
-main.py and dump.py auto-detect ports:
+### 4. Verify the Logger
 
-macOS: /dev/tty.usbserial*, /dev/tty.SLAB*
-Linux: /dev/ttyUSB*
-Windows: COM*
+Check that the service is running correctly.
+```bash
+sudo systemctl status smart-meter-logger.service
+```
+You should see a green `active (running)` status. You can view its live output with:
+```bash
+journalctl -u smart-meter-logger.service -f
+```
 
-If auto-detect fails, edit find_port() in scripts or hardcode your port.
+### 5. Launch the Dashboard
 
-Default Modbus unit ID: SLAVE_ID = 1
+With the logger running in the background, you can now launch the Streamlit web app.
+```bash
+# Make sure your venv is active
+source venv/bin/activate
 
-Registers & settings are defined in config.json:
+# Run the dashboard
+streamlit run dashboard.py
+```
+Your default web browser will open, and the dashboard will be available at **`http://localhost:8501`**.
 
-{
-  "slave_ids": [1],
-  "interval": 5,
-  "duration": 60,
-  "word_order": "ABCD",
-  "scale": 1.0,
-  "registers": {
-    "voltage_v1":        { "addr": 30, "type": "float32", "scale": 1.0 },
-    "current_a1":        { "addr": 40, "type": "float32", "scale": 1.0 },
-    "active_power_w1":   { "addr": 50, "type": "float32", "scale": 1.0 },
-    "reactive_power_var1": { "addr": 60, "type": "float32", "scale": 1.0 },
-    "power_factor_pf1":  { "addr": 70, "type": "float32", "scale": 1.0 },
-    "frequency_hz":      { "addr": 80, "type": "float32", "scale": 1.0 },
-    "energy_kwh":        { "addr": 100, "type": "float32", "scale": 0.001 }
-  }
-}
+---
 
+## Legacy Scripts
 
-# How to run
-
-All run from project root with venv active.
-
-1. Log real-time data
-
-Starts logging and appends to log_files/meter_log_master.csv:
-
-python main.py
-
-Console output:
-
-2025-09-28 11:21:17 | V=227.43 V | f=50.01 Hz | I=2.27 A | P=710.9 W | E=1.28 kWh
-
-2. Dump registers (debug)
-
-Explores raw registers, word orders, and scaling:
-
-python dump.py
-
-Output: log_files/meter_dump_*.csv.
-
-3. Analyze logs
-
-Generates daily summaries + plots (auto for all dates, all meters):
-
-python analyzer.py
-
-Daily summary → log_files/daily_summary.csv
-Plots → log_files/plots/plot_<date>_meter<meter_id>.png
-
-Sample summary:
-
-=== DAILY SUMMARY ===
-              voltage_avg  current_avg  power_avg  freq_avg  energy_total
-date       meter_id
-2025-09-24 1        227.3        2.27     591.8     50.02          0.023
-
-4. Run everything automatically
-
-./runner.sh
-
-Starts logger (main.py)
-Runs analyzer after logging finishes
-Outputs CSVs + plots in log_files/
-
-
-# Output format
-
-main.py CSV(meter_log_master.csv):
-timestamp,date,meter_id,voltage_v1,frequency_hz,current_a1,active_power_w1,total_energy_kwh,delta_energy_kwh
-
-dump.py CSV
-timestamp,func,reg,order,scale,value
-
-analyzer.py Summary (daily_summary.csv)
-date,meter_id,voltage_avg,voltage_min,voltage_max,current_avg,power_avg,freq_avg,energy_total delta_energy_total
-
-
-# Troubleshooting
-
-No serial port found → check cable/driver.
-
-macOS: ls /dev/tty.*
-Linux: ls /dev/ttyUSB*
-Windows: Device Manager → Ports
-
-Device busy → close other serial programs (Arduino IDE, screen, etc.).
-
-Import error (pandas/matplotlib) → install in the active venv.
-
-libusb errors → install system package (see above).
-
-# Recommended workflow
-
-Run dump.py once to explore registers/word orders.
-Run main.py to log data into the master CSV.
-Run analyzer.py to generate plots & summaries.
-Expand config.json when adding new meters or registers.
+This repository also contains older scripts from the initial development phase (e.g., `analyzer.py`, `dump.py`). These were used for CSV-based logging and initial meter discovery and are no longer part of the primary live-monitoring workflow.
