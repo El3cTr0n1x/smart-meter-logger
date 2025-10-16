@@ -6,7 +6,7 @@ __pycache__/
 *.pyc
 
 # Database file
-log_files/smart_meter.db
+log_files/
 
-# Runtime logs
-log_files/runtime.log
+# Temporary files
+raw_frames.log
