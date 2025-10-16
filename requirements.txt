@@ -1,0 +1,5 @@
+pymodbus
+pyserial
+pandas
+matplotlib
+jupyter

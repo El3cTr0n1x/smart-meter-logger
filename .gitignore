@@ -1,0 +1,12 @@
+# Virtual Environment
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Database file
+log_files/smart_meter.db
+
+# Runtime logs
+log_files/runtime.log
