@@ -1,12 +1,18 @@
-# Virtual Environment
-venv/
-
-# Python cache
+# Python Caches
 __pycache__/
 *.pyc
 
-# Database file
-log_files/
+# Virtual Environment
+venv/
 
-# Temporary files
-raw_frames.log
+# Local Data & Logs
+log_files/
+smart_meter.db
+
+# --- CRITICAL: Credentials ---
+# Ignore keys in the root folder
+service-account-key.json
+
+# Ignore files in the backend folder
+campus-dashboard-backend/venv/
+campus-dashboard-backend/service-account-key.json
