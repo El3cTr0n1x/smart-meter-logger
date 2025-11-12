@@ -1,74 +1,147 @@
-# Campus Energy Monitoring System (Full-Stack IoT Pipeline)
+# Smart Energy Meter Logger & Analytics Dashboard
 
-This project is a complete, end-to-end IoT data pipeline that reads real-time electrical data from a Modbus RTU smart meter, processes it, and serves it to two different live dashboards.
+This is a university project to log and analyze energy data from a physical smart meter. The system is designed to simulate a multi-meter campus environment for demonstration purposes.
 
-The system is designed for robust, 24/7 operation on a Linux server, with all components managed by `systemd`.
+The project consists of two main components:
+1. **`main.py` (Logger):** A robust Python script that reads live data from a physical Modbus meter. It logs this data as "Meter 1" and simultaneously generates live, scaled, and jittered simulated data for "Meter 2" and "Meter 3".
+2. **`analytics_dashboard.py` (Dashboard):** A Streamlit web application that reads directly from the local SQLite database. It displays live metrics, historical analytics (by weekday, by hour), and detailed power profiles for all three meters.
 
----
-
-## 🏛️ Project Architecture
-
-This system is built on a 3-tier architecture to decouple the logger, data aggregator, and web server.
-
-1. **Tier 1: Data Logging (`main.py`)**
-   * A Python script reads 5 real-time parameters (Voltage, Current, Power, etc.) from a smart meter every 5 seconds via Modbus RTU.
-   * It **calculates** energy consumption (in Watt-hours) from the stable Power (W) reading, as the meter's built-in energy register was found to be unreliable.
-   * This data is sent to two places:
-     1. A local **SQLite database** (`smart_meter.db`) for high-resolution local analysis.
-     2. A local **MQTT broker** (Mosquitto) for real-time data streaming.
-
-2. **Tier 2: Aggregation & Storage (`firebase_bridge.py`)**
-   * A separate Python service listens to the MQTT topic.
-   * To solve Firebase's free-tier quota limits (20k writes/day), this script **aggregates 5-second readings into 5-minute averages**.
-   * This one aggregated document (containing the *sum* of energy and *average* of power) is written to a **Firebase Firestore** collection.
-   * **Result:** Database writes are reduced by **98%** (from ~17,280 to ~288 per day).
-
-3. **Tier 3: API & Frontend (`app.py`, `index.html`)**
-   * A **Flask (Gunicorn) REST API** (`app.py`) queries the `readings_5min_avg` collection in Firebase.
-   * It serves this data to a simple, auto-refreshing **HTML/JavaScript dashboard** (`index.html`) that displays the campus-wide energy totals.
+This architecture replaces a previous, more complex system that relied on Firebase and a separate Flask API.
 
 ---
 
-## ✨ Features
+## ⚡ Features
 
-* **Real-time Modbus Data:** Polls a smart meter for 5 electrical parameters every 5 seconds.
-* **Calculated Energy:** Fixes unreliable hardware by calculating energy from power (`Energy = Power × Time`).
-* **Dual Dashboards:**
-  1. **Local (Streamlit):** A high-resolution dashboard (`dashboard.py`) for live debugging, powered by the local SQLite DB.
-  2. **Cloud (Web):** A low-resolution, scalable dashboard (`index.html`) for public viewing, powered by Firebase.
-* **Scalable Architecture:** Uses an MQTT broker to decouple the logger from the cloud services.
-* **Cost Optimization:** Reduces Firebase writes by 98% through aggregation.
-* **Robust Deployment:** All 3 core Python scripts (`main.py`, `firebase_bridge.py`, `app.py`) are managed as independent, auto-restarting `systemd` services for 24/7 uptime on a Linux server.
+* **Live Data Logging:** Connects to any serial Modbus device to read registers.  
+* **Robust Energy Calculation:** Manually calculates `energy_wh_interval` from `active_power` readings, bypassing faulty meter registers.  
+* **Live Multi-Meter Simulation:** Reads from one real meter and generates live, realistic data for two additional simulated meters.  
+* **Local-First Analytics:** All data is logged and read from a local `campus_energy_multi.db` SQLite database.  
+* **Rich Analytics Dashboard:**
+  * High-level KPI metrics (Today, This Week, This Month)
+  * Total consumption breakdown by meter
+  * Historical “Total Energy Per Day” bar chart
+  * “Day of Week” and “Hour of Day” analysis to find peak usage
+  * Detailed, zoomable power-draw graphs for any selected day
 
 ---
 
-## 📁 Repository Structure
+## 🧠 Technology Stack
+
+* **Core:** Python 3  
+* **Logger:** `pyserial`, `paho-mqtt`  
+* **Database:** SQLite3  
+* **Dashboard:** `streamlit`  
+* **Analytics:** `pandas`  
+* **Plotting:** `plotly`  
+
+---
+
+## 📁 Project Structure
 
 ```text
-smart-meter-logger/
+SMART_METER/
 │
-├── main.py                  # (Service 1) The Modbus logger
-├── firebase_bridge.py       # (Service 2) The MQTT-to-Firebase aggregator
-├── dashboard.py             # The local Streamlit dashboard
-├── fix_db.py                # Utility to repair corrupted timestamps
-├── requirements.txt         # Python libraries for the logger
+├── main.py                 # The live logger (reads from meter, simulates 2–3, logs to DB)
+├── analytics_dashboard.py  # The Streamlit analytics dashboard
+├── create_sim_database.py  # One-time script to build the DB from old data
+├── requirements.txt        # Python dependencies for the project
 │
-├── campus-dashboard-backend/
-│   ├── app.py               # (Service 3) The Flask API server
-│   ├── index.html           # The public-facing web dashboard
-│   ├── requirements.txt     # Python libraries for the API
-│   └── .gitignore           # Ignores credentials and venv for the API
-│
-├── .gitignore               # Main gitignore (ignores local DB, logs, venv, keys)
-└── README.md                # This file
-```
+├── .gitignore              # Ensures database files and logs are not committed
+├── campus_energy_multi.db  # The analytics database (NOT tracked by Git)
+└── log_files/              # Folder containing old 'smart_meter.db' (NOT tracked by Git)
+
 ---
 
-## 🛠️ Key Technologies
+## 🚀 How to Run
 
-| Category | Tools |
-|-----------|-------|
-| **Languages** | Python (Flask, Pandas, Streamlit), SQL, HTML/JS |
-| **Platforms & Databases** | Linux, Firebase (Firestore), SQLite, MQTT |
-| **DevOps & Tools** | systemd, Gunicorn, Git |
-| **Protocols** | Modbus RTU |
+### 1. First-Time Setup
+
+1. **Clone the Repository:**
+
+   ```bash
+   git clone https://github.com/El3cTr0n1x/smart-meter-logger.git
+   cd smart-meter-logger
+   ```
+
+2. **Create a Virtual Environment:**
+
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
+
+3. **Install Dependencies:**
+
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Create the Database:**
+
+   * Place your original `smart_meter.db` inside the `log_files/` folder.
+   * Run:
+
+     ```bash
+     python3 create_sim_database.py
+     ```
+   * This will generate `campus_energy_multi.db` with all historical and simulated data.
+
+---
+
+### 2. Running the Application
+
+Run these two services in separate terminals.
+
+**Terminal 1 – Logger (connects to meter):**
+
+```bash
+python3 main.py
+```
+
+*Shows connection logs and records data every 5 seconds.*
+
+**Terminal 2 – Dashboard:**
+
+```bash
+streamlit run analytics_dashboard.py
+```
+
+*Opens a local analytics dashboard in your browser.*
+
+---
+
+*Updated: **2025-11-12** — Local-first analytics architecture.*
+
+````
+
+---
+
+### ✅ `requirements.txt`
+
+```text
+# Python dependencies for the Smart Meter Logger & Analytics Dashboard
+
+# --- For main.py (Logger) ---
+pyserial       # For serial/Modbus communication
+paho-mqtt      # For MQTT publishing
+
+# --- For analytics_dashboard.py (Dashboard) ---
+streamlit      # Web dashboard framework
+pandas         # Data manipulation and analytics
+plotly         # Interactive plotting
+
+# --- For create_sim_database.py (Setup Script) ---
+pytz           # Timezone conversion during DB creation
+````
+
+---
+
+### ✅ Commands to commit and push
+
+```bash
+git add README.md requirements.txt
+git commit -m "docs: update README and consolidate requirements"
+git push origin main
+```
+
+---
