@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """
-main.py — Smart Meter Logger (v9.2 - Live Simulation)
+main.py — Smart Meter Logger
 
 - This script reads REAL data from Meter 1.
 - It then uses that data to generate LIVE SIMULATED data
   for Meters 2 and 3 in real-time.
 - This makes the dashboard appear as if all 3 meters are live.
+- Includes WAL mode fix for SQLite concurrency.
 """
 
 import serial
@@ -18,7 +19,7 @@ import sqlite3
 import json
 import paho.mqtt.client as mqtt
 from datetime import datetime
-import random # <--- Make sure random is imported
+import random
 
 # --- CONFIGURATION ---
 DB_NAME = "campus_energy_multi.db" 
@@ -36,7 +37,7 @@ BUILDING = "ECE"
 FLOOR = "1"
 mqtt_client = None
 
-# Modbus register map (Correct from your v9.1)
+# Modbus register map 
 REGISTERS = {
     "voltage_v1":       {"addr": 6,  "word_order": "ABCD", "unpack": ">f", "scale": 1.0},
     "current_a1":       {"addr": 8,  "word_order": "ABCD", "unpack": ">f", "scale": 1.0},
@@ -52,11 +53,13 @@ READ_BLOCKS = [
 ]
 
 
-# --- UTILITY FUNCTIONS (Unchanged) ---
+# --- UTILITY FUNCTIONS ---
 def log_runtime(msg):
+    """Prints a message with a timestamp."""
     print(f"{datetime.now():%Y-%m-%d %H:%M:%S} | {msg}")
 
 def calc_crc(data):
+    """Calculates the CRC-16 checksum for a Modbus frame."""
     crc = 0xFFFF
     for pos in data:
         crc ^= pos
@@ -65,68 +68,80 @@ def calc_crc(data):
     return crc.to_bytes(2, "little")
 
 def build_poll_frame(slave, start, qty):
+    """Builds a Modbus RTU frame for reading holding registers."""
     frame = bytes([slave, 3, (start >> 8) & 0xFF, start & 0xFF, (qty >> 8) & 0xFF, qty & 0xFF])
     return frame + calc_crc(frame)
 
 def validate_response(frame, slave, func):
+    """Validates a Modbus response frame."""
     return len(frame) >= 5 and calc_crc(frame[:-2]) == frame[-2:] and frame[0] == slave and frame[1] == func
 
 def reorder_words(raw4_bytes, order="ABCD"):
+    """Reorders the bytes of a 4-byte float value."""
     mapping = {"A": 0, "B": 1, "C": 2, "D": 3}
     return bytes([raw4_bytes[mapping[c]] for c in order])
 
-# --- DATABASE SETUP (Unchanged) ---
+# --- DATABASE SETUP (WITH WAL MODE) ---
 def setup_database():
+    """
+    Checks if the new database and tables exist.
+    *** NEW: Enables WAL mode for better concurrency ***
+    """
     try:
-        conn = sqlite3.connect(DB_NAME)
+        # Connect with a timeout, just in case
+        conn = sqlite3.connect(DB_NAME, timeout=10.0)
         cursor = conn.cursor()
+        
+        # Enable Write-Ahead Logging (WAL) mode
+        cursor.execute("PRAGMA journal_mode=WAL;")
+
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='meter_readings'")
         if cursor.fetchone() is None:
             log_runtime(f"Error: Table 'meter_readings' not found in '{DB_NAME}'.")
             log_runtime("Please run 'create_sim_database.py' first.")
+            conn.close()
             return False
+            
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='meter_hierarchy'")
         if cursor.fetchone() is None:
             log_runtime(f"Error: Table 'meter_hierarchy' not found in '{DB_NAME}'.")
             log_runtime("Please run 'create_sim_database.py' first.")
+            conn.close()
             return False
-        log_runtime(f"✅ Successfully connected to local database '{DB_NAME}'.")
+            
+        log_runtime(f"✅ Successfully connected to local database '{DB_NAME}'. (WAL mode enabled)")
+        conn.close()
         return True
     except Exception as e:
         log_runtime(f"⚠️ Error checking local database: {e}")
         return False
-    finally:
-        if conn:
-            conn.close()
 
-# --- NEW: Helper function for live simulation ---
+# --- Helper function for live simulation ---
 def simulate_reading(base_data, scale_factor):
     """Takes a real data dict and returns a scaled/jittered simulated dict."""
     sim_data = base_data.copy()
-    jitter = random.uniform(0.95, 1.05) # Add ±5% randomness
+    jitter = random.uniform(0.95, 1.05) 
     
-    # Scale power, current, and energy
     sim_data['current_a1'] = round(base_data.get('current_a1', 0) * scale_factor * jitter, 2)
     sim_data['active_power_w1'] = round(base_data.get('active_power_w1', 0) * scale_factor * jitter, 2)
     sim_data['energy_wh_interval'] = round(base_data.get('energy_wh_interval', 0) * scale_factor * jitter, 5)
     
-    # Slightly jitter the power factor
     pf_jitter = random.uniform(0.98, 1.02)
     sim_data['power_factor_pf1'] = round(base_data.get('power_factor_pf1', 0) * pf_jitter, 3)
     
     return sim_data
 
-# --- DATABASE LOGGING (OVERHAULED) ---
+# --- DATABASE LOGGING (WITH TIMEOUT FIX) ---
 def log_to_local_db(data, meter_id):
     """
     Logs a single data dictionary to the new 'meter_readings' table.
-    Now takes 'meter_id' as an argument.
     """
     try:
-        conn = sqlite3.connect(DB_NAME)
+        # Wait up to 10 seconds if the database is locked
+        conn = sqlite3.connect(DB_NAME, timeout=10.0)
+        
         cur = conn.cursor()
         
-        # Use 'datetime('now', 'localtime')' to store the naive IST time
         cur.execute('''
             INSERT INTO meter_readings 
             (meter_id, timestamp, voltage, current, power, energy_wh_interval, pf)
@@ -152,13 +167,13 @@ def on_connect(client, userdata, flags, rc, properties):
         log_runtime(f"⚠️ Failed to connect to MQTT broker, return code {rc}")
 
 def on_disconnect(client, userdata, flags, rc, properties):
-    # rc=0 means a clean disconnect (e.g., script shutting down)
     if rc != 0:
         log_runtime(f" MQTT> Unexpectedly disconnected from broker with code {rc}")
 
-# --- SIGNAL HANDLING (Unchanged) ---
+# --- SIGNAL HANDLING ---
 terminate = False
 def handle_sig(sig, frame):
+    """Handles SIGINT/SIGTERM for graceful shutdown."""
     global terminate
     log_runtime(f"Received signal {sig}, shutting down gracefully...")
     terminate = True
@@ -169,6 +184,7 @@ signal.signal(signal.SIGTERM, handle_sig)
 
 # --- MAIN APPLICATION ---
 def main():
+    """Main loop: Connects to meter, reads data, logs to SQLite, and publishes to MQTT."""
     global mqtt_client
 
     if not setup_database():
@@ -193,7 +209,7 @@ def main():
     while not terminate:
         cycle_start_time = time.time()
 
-        # --- STEP 1: SERIAL CONNECTION (Unchanged) ---
+        # --- STEP 1: SERIAL CONNECTION ---
         if ser is None or not ser.is_open:
             log_runtime("Searching for serial device...")
             port_list = (glob.glob("/dev/ttyUSB*") + glob.glob("/dev/tty.usbserial*"))
@@ -213,7 +229,7 @@ def main():
                 reconnect_delay = min(reconnect_delay * 2, 60)
                 continue
 
-        # --- STEP 2: READ METER DATA (Unchanged) ---
+        # --- STEP 2: READ METER DATA ---
         try:
             timestamp = datetime.now()
             register_map = {}
@@ -243,7 +259,7 @@ def main():
                     all_blocks_read_successfully = False
                     break 
 
-            # --- STEP 3 & 4: PROCESS, LOG, & SIMULATE (OVERHAULED) ---
+            # --- STEP 3 & 4: PROCESS, LOG, & SIMULATE ---
             if all_blocks_read_successfully:
                 real_data = {}
                 for key, meta in REGISTERS.items():
@@ -258,7 +274,6 @@ def main():
                         log_runtime(f"⚠️ Missing data for register {key} (addr {addr})")
                         real_data[key] = None # Mark as missing
 
-                # Ensure all expected values were successfully decoded
                 if all(v is not None for v in real_data.values()):
                     
                     # Calculate energy for the real meter
@@ -267,7 +282,7 @@ def main():
                     energy_wh_interval = power_w * interval_hours
                     real_data['energy_wh_interval'] = round(energy_wh_interval, 5)
 
-                    # --- NEW SIMULATION LOGIC ---
+                    # --- Live Simulation Logic ---
                     # 1. Log the real data for Meter 1
                     log_to_local_db(real_data, 1)
                     
@@ -282,7 +297,7 @@ def main():
                     log_runtime(f"✅ Logged real data for Meter 1 and simulated data for Meters 2 & 3.")
                     # ---------------------------
 
-                    # --- PUBLISH TO MQTT (Unchanged) ---
+                    # --- PUBLISH TO MQTT ---
                     if mqtt_client and mqtt_client.is_connected():
                         mqtt_payload = real_data.copy()
                         mqtt_payload['timestamp'] = timestamp.isoformat()
@@ -304,14 +319,14 @@ def main():
             log_runtime(f"An unexpected error occurred: {e}")
             time.sleep(2)
 
-        # --- Wait for Next Interval (Unchanged) ---
+        # --- Wait for Next Interval ---
         time_spent = time.time() - cycle_start_time
         wait_time = max(0, INTERVAL - time_spent)
         for _ in range(int(wait_time / 0.1)):
             if terminate: break
             time.sleep(0.1)
 
-    # --- Cleanup (Unchanged) ---
+    # --- Cleanup ---
     if ser and ser.is_open:
         ser.close()
     if mqtt_client:
