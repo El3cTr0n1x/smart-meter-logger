@@ -1,18 +1,21 @@
-# Python Caches
+# Python
 __pycache__/
-*.pyc
-
-# Virtual Environment
 venv/
+*.pyc
+*.pyo
 
-# Local Data & Logs
+# Database Files
+# Ignore all databases...
+*.db
+*.sqlite
+*.sqlite3
+# ...EXCEPT for the public demo database
+!demo_data_v2.db
+
+# Log Files & Directories
 log_files/
-smart_meter.db
+*.log
 
-# --- CRITICAL: Credentials ---
-# Ignore keys in the root folder
-service-account-key.json
-
-# Ignore files in the backend folder
-campus-dashboard-backend/venv/
-campus-dashboard-backend/service-account-key.json
+# Secrets & Credentials
+serviceAccountKey.json
+*.env

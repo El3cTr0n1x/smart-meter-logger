@@ -7,7 +7,7 @@ import os
 
 # --- Configuration  ---
 LIVE_DB = 'campus_energy_multi.db'
-DEMO_DB = 'demo_database.db'
+DEMO_DB = 'demo_data_v2.db'
 DB_NAME = '' # We will set this now
 
 # If we're running locally (where the live DB exists), use it.
