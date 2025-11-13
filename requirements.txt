@@ -1,15 +1,13 @@
-```text
 # Python dependencies for the Smart Meter Logger & Analytics Dashboard
 
 # --- For main.py (Logger) ---
-pyserial       # For serial/Modbus communication
-paho-mqtt      # For MQTT publishing
+pyserial    # For serial/Modbus communication
+paho-mqtt   # For MQTT publishing
 
 # --- For analytics_dashboard.py (Dashboard) ---
-streamlit      # Web dashboard framework
-pandas         # Data manipulation and analytics
-plotly         # Interactive plotting
+streamlit   # The web dashboard framework
+pandas      # For data manipulation and analytics
+plotly      # For interactive plotting
 
 # --- For create_sim_database.py (Setup Script) ---
-pytz           # Timezone conversion during DB creation
-```
+pytz        # For timezone conversion during DB creation
