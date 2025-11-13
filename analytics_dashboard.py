@@ -321,17 +321,12 @@ with tab_detail:
         
         if not day_power_df.empty:
             
-            # --- THIS IS THE FIX ---
             # 1. Convert timestamp strings to datetime objects
-            # format='mixed' tells Pandas to handle both formats (with and without microseconds)
             day_power_df['timestamp'] = pd.to_datetime(day_power_df['timestamp'], format='mixed')
             
-            # 2. Re-interpreting the naive time as IST
-            # We are NOT adding 5.5 hours. We are plotting the time as-is,
-            # but we are telling the axis to *label* it as IST.
-            # This is the fix from our previous conversation.
-            day_power_df['timestamp'] = day_power_df['timestamp'].dt.tz_localize('Asia/Kolkata', ambiguous='infer')
-            # ---------------------
+            # 2. Manually add 5.5 hours to shift from UTC (in DB) to IST (for display)
+            day_power_df['timestamp'] = day_power_df['timestamp'] + pd.to_timedelta('05:30:00')
+            # ----------------------------------------
             
             fig_day_power = px.line(
                 day_power_df,
@@ -339,11 +334,9 @@ with tab_detail:
                 y="power",
                 color="lab_name",
                 title=f"Power Draw on {selected_date.strftime('%B %d, %Y')}",
-                labels={"power": "Power (W)", "timestamp": "Time (IST)"}
+                labels={"power": "Power (W)", "timestamp": "Time (IST)"} # Label the axis as IST
             )
             
-            # Force the x-axis to display in IST
-            fig_day_power.update_xaxes(timezone='Asia/Kolkata')
             
             fig_day_power.update_traces(marker=None)
             st.plotly_chart(fig_day_power, use_container_width=True)
