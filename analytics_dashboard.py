@@ -161,7 +161,7 @@ def get_power_for_day(meter_ids, selected_date):
 
 # --- Streamlit Dashboard UI ---
 if DB_NAME == LIVE_DB:
-    st.title("⚡ Campus Smart Meter Dashboard (LIVE)")
+    st.title("⚡ Campus Smart Meter Dashboard")
     st.caption("Multi-meter analytics with live data and detailed breakdown.")
 else:
     st.title("⚡ Campus Smart Meter Dashboard (DEMO)")
@@ -198,7 +198,7 @@ with tab_analytics:
     if not hourly_df.empty:
         fig_hourly = px.line(hourly_df, x="Hour of Day", y="Average Power (W)", color="lab_name", title="Average Power Consumption by Hour", markers=True);st.plotly_chart(fig_hourly, use_container_width=True)
 
-# --- Tab 3: Detailed Day Analysis  ---
+# --- Tab 3: Detailed Day Analysis (FINAL, NO MATH) ---
 with tab_detail:
     st.header("Detailed Day Analysis")
     st.markdown("Select a date to inspect the detailed power profile for that day.")
@@ -206,7 +206,11 @@ with tab_detail:
     if selected_date:
         day_power_df = get_power_for_day(selected_meters, selected_date)
         if not day_power_df.empty:
+            
+            # --- THIS IS THE CORRECT, SIMPLE LOGIC ---
+            # It just reads the data, which is now correct in the DB
             day_power_df['timestamp'] = pd.to_datetime(day_power_df['timestamp'], format='mixed')
+            # --- (NO MATH, NO TIMEZONES) ---
             
             fig_day_power = px.line(
                 day_power_df,
