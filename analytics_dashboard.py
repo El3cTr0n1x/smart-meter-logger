@@ -3,10 +3,23 @@ import sqlite3
 import pandas as pd
 import plotly.express as px
 import datetime
+import os  
 
-# --- Configuration ---
-DB_NAME = 'campus_energy_multi.db'
-st.set_page_config(page_title="Campus Energy Dashboard", layout="wide")
+# --- Configuration  ---
+LIVE_DB = 'campus_energy_multi.db'
+DEMO_DB = 'demo_database.db'
+DB_NAME = '' # We will set this now
+
+# If we're running locally (where the live DB exists), use it.
+# If not (e.g., on Streamlit Cloud), fall back to the demo DB.
+if os.path.exists(LIVE_DB):
+    DB_NAME = LIVE_DB
+    st.set_page_config(page_title="Campus Energy (LIVE)", layout="wide")
+else:
+    DB_NAME = DEMO_DB
+    st.set_page_config(page_title="Campus Energy (Demo)", layout="wide")
+# --- End of configuration ---
+
 
 # --- Database Connection & Caching ---
 
@@ -35,7 +48,7 @@ def get_meter_hierarchy():
     """Fetches the meter tree structure."""
     return run_query("SELECT * FROM meter_hierarchy")
 
-# NEW: KPI Queries
+# KPI Queries
 def get_kpi_metrics(meter_ids):
     if not meter_ids:
         return {}
@@ -94,7 +107,7 @@ def get_consumption_by_weekday(meter_ids):
     """
     return run_query(query)
 
-# NEW: Daily History Query (from your screenshot)
+# Daily History Query 
 def get_daily_usage_history(meter_ids):
     if not meter_ids: return pd.DataFrame()
     id_tuple = tuple(meter_ids)
@@ -143,7 +156,7 @@ def get_latest_readings(meter_ids):
     """
     return run_query(query)
 
-# NEW: Detailed Day Profile Query
+# Detailed Day Profile Query
 def get_power_for_day(meter_ids, selected_date):
     if not meter_ids: return pd.DataFrame()
     id_tuple = tuple(meter_ids)
@@ -164,8 +177,14 @@ def get_power_for_day(meter_ids, selected_date):
 
 # --- Streamlit Dashboard UI ---
 
-st.title("⚡ Campus Smart Meter Dashboard")
-st.caption("Multi-meter analytics with live data and detailed breakdown.")
+# We check DB_NAME to show a 'LIVE' or 'DEMO' title
+if DB_NAME == LIVE_DB:
+    st.title("⚡ Campus Smart Meter Dashboard (LIVE)")
+    st.caption("Multi-meter analytics with live data and detailed breakdown.")
+else:
+    st.title("⚡ Campus Smart Meter Dashboard (DEMO)")
+    st.caption("Showing a static data snapshot for demonstration.")
+
 
 # --- 1. Load Data ---
 hierarchy_df = get_meter_hierarchy()
@@ -192,7 +211,7 @@ tab_overview, tab_analytics, tab_detail, tab_raw_data = st.tabs(
 with tab_overview:
     st.header("Consumption Overview")
     
-    # NEW: KPI Metrics
+    # KPI Metrics
     kpi_data = get_kpi_metrics(selected_meters)
     kpi_cols = st.columns(3)
     kpi_cols[0].metric("Today's Consumption", f"{kpi_data.get('today_kwh', 0):.2f} kWh")
@@ -242,8 +261,7 @@ with tab_analytics:
     st.subheader("Daily Energy Usage History (All Selected Meters)")
     daily_history_df = get_daily_usage_history(selected_meters)
     if not daily_history_df.empty:
-        # Tell pandas to treat these dates as IST
-        daily_history_df['Date'] = pd.to_datetime(daily_history_df['Date']).dt.tz_localize('Asia/Kolkata')
+        daily_history_df['Date'] = pd.to_datetime(daily_history_df['Date'])
         fig_daily_history = px.bar(
             daily_history_df,
             x="Date",
@@ -290,7 +308,7 @@ with tab_analytics:
         st.plotly_chart(fig_hourly, use_container_width=True)
 
 
-# --- Tab 3: Detailed Day Analysis (NEW) ---
+# --- Tab 3: Detailed Day Analysis  ---
 with tab_detail:
     st.header("Detailed Day Analysis")
     st.markdown("Select a date to inspect the detailed power profile for that day.")
@@ -305,8 +323,14 @@ with tab_detail:
             
             # --- THIS IS THE FIX ---
             # 1. Convert timestamp strings to datetime objects
-            # We are NOT adding 5.5 hours. We are plotting the time as-is.
+            # format='mixed' tells Pandas to handle both formats (with and without microseconds)
             day_power_df['timestamp'] = pd.to_datetime(day_power_df['timestamp'], format='mixed')
+            
+            # 2. Re-interpreting the naive time as IST
+            # We are NOT adding 5.5 hours. We are plotting the time as-is,
+            # but we are telling the axis to *label* it as IST.
+            # This is the fix from our previous conversation.
+            day_power_df['timestamp'] = day_power_df['timestamp'].dt.tz_localize('Asia/Kolkata', ambiguous='infer')
             # ---------------------
             
             fig_day_power = px.line(
@@ -315,10 +339,11 @@ with tab_detail:
                 y="power",
                 color="lab_name",
                 title=f"Power Draw on {selected_date.strftime('%B %d, %Y')}",
-                labels={"power": "Power (W)", "timestamp": "Time (IST)"} # Added (IST) to label
+                labels={"power": "Power (W)", "timestamp": "Time (IST)"}
             )
             
-            # We don't need any confusing .update_xaxes() or .update_layout()
+            # Force the x-axis to display in IST
+            fig_day_power.update_xaxes(timezone='Asia/Kolkata')
             
             fig_day_power.update_traces(marker=None)
             st.plotly_chart(fig_day_power, use_container_width=True)
