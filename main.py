@@ -3,9 +3,9 @@
 main.py — Smart Meter Logger
 
 - This script reads REAL data from Meter 1.
-- It then uses that data to generate LIVE SIMULATED data
-  for Meters 2 and 3 in real-time.
-- This makes the dashboard appear as if all 3 meters are live.
+- It then uses that data to generate LIVE SIMULATED data for Meters 2 and 3 in real-time.
+- It calculates and stores the CUMULATIVE 'energy_wh_total'.
+- Added a function to check for and log alerts for high power or low voltage.
 - Includes WAL mode fix for SQLite concurrency.
 """
 
@@ -23,21 +23,25 @@ import random
 
 # --- CONFIGURATION ---
 DB_NAME = "campus_energy_multi.db" 
-SLAVE_ID = 1 # The physical meter we are reading from
+SLAVE_ID = 1 
 BAUD_RATE = 9600
 TIMEOUT = 1.0
-INTERVAL = 5 # 5 seconds
+INTERVAL = 5 
+
+# --- Alert Configuration ---
+ALERT_HIGH_POWER_W = 800.0 # Log a CRITICAL alert if power exceeds this
+ALERT_LOW_VOLTAGE_V = 210.0 # Log a WARNING if voltage drops below this
 
 # --- MQTT CONFIGURATION ---
 MQTT_BROKER_HOST = "localhost"
 MQTT_BROKER_PORT = 1883
 MQTT_TOPIC = "pes/campus/energy/meter/reading"
-MQTT_METER_ID = "ECE-F1-001_DEV" # Changed ID to avoid collision
+MQTT_METER_ID = "ECE-F1-001_DEV" 
 BUILDING = "ECE"
 FLOOR = "1"
 mqtt_client = None
 
-# Modbus register map 
+# Modbus register map
 REGISTERS = {
     "voltage_v1":       {"addr": 6,  "word_order": "ABCD", "unpack": ">f", "scale": 1.0},
     "current_a1":       {"addr": 8,  "word_order": "ABCD", "unpack": ">f", "scale": 1.0},
@@ -47,9 +51,9 @@ REGISTERS = {
 }
 
 READ_BLOCKS = [
-    (6, 6),   # Reads registers 6 through 11 (V, I, W)
-    (34, 2),  # Reads registers 34 through 35 (PF)
-    (54, 2)   # Reads registers 54 through 55 (Hz)
+    (6, 6),   
+    (34, 2),  
+    (54, 2)   
 ]
 
 
@@ -85,27 +89,21 @@ def reorder_words(raw4_bytes, order="ABCD"):
 def setup_database():
     """
     Checks if the new database and tables exist.
-    *** NEW: Enables WAL mode for better concurrency ***
+    Enables WAL mode for better concurrency.
     """
     try:
-        # Connect with a timeout, just in case
         conn = sqlite3.connect(DB_NAME, timeout=10.0)
         cursor = conn.cursor()
-        
-        # Enable Write-Ahead Logging (WAL) mode
         cursor.execute("PRAGMA journal_mode=WAL;")
-
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='meter_readings'")
         if cursor.fetchone() is None:
             log_runtime(f"Error: Table 'meter_readings' not found in '{DB_NAME}'.")
-            log_runtime("Please run 'create_sim_database.py' first.")
             conn.close()
             return False
             
         cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='meter_hierarchy'")
         if cursor.fetchone() is None:
             log_runtime(f"Error: Table 'meter_hierarchy' not found in '{DB_NAME}'.")
-            log_runtime("Please run 'create_sim_database.py' first.")
             conn.close()
             return False
             
@@ -131,35 +129,78 @@ def simulate_reading(base_data, scale_factor):
     
     return sim_data
 
-# --- DATABASE LOGGING (WITH TIMEOUT FIX) ---
+# --- DATABASE LOGGING ---
 def log_to_local_db(data, meter_id):
     """
-    Logs a single data dictionary to the new 'meter_readings' table.
+    Logs data and calculates the new CUMULATIVE total energy.
     """
     try:
-        # Wait up to 10 seconds if the database is locked
         conn = sqlite3.connect(DB_NAME, timeout=10.0)
-        
         cur = conn.cursor()
+        
+        # 1. Get the new interval energy
+        new_interval = data.get('energy_wh_interval', 0.0)
+        
+        # 2. Get the last known total energy for this meter
+        cur.execute("""
+            SELECT energy_wh_total 
+            FROM meter_readings 
+            WHERE meter_id = ? 
+            ORDER BY id DESC 
+            LIMIT 1
+        """, (meter_id,))
+        
+        last_total_row = cur.fetchone()
+        
+        last_total = 0.0
+        if last_total_row and last_total_row[0] is not None:
+            last_total = last_total_row[0]
+
+        # 3. Calculate the new cumulative total
+        new_total = last_total + new_interval
         
         cur.execute('''
             INSERT INTO meter_readings 
-            (meter_id, timestamp, voltage, current, power, energy_wh_interval, pf)
-            VALUES (?, datetime('now', 'localtime'), ?, ?, ?, ?, ?)
+            (meter_id, timestamp, voltage, current, power, energy_wh_interval, pf, energy_wh_total)
+            VALUES (?, datetime('now', 'localtime'), ?, ?, ?, ?, ?, ?)
         ''', (
             meter_id, 
             data.get('voltage_v1'), 
             data.get('current_a1'), 
             data.get('active_power_w1'), 
-            data.get('energy_wh_interval'),
-            data.get('power_factor_pf1')
+            new_interval,
+            data.get('power_factor_pf1'),
+            new_total
         ))
         conn.commit()
         conn.close()
     except sqlite3.Error as db_err:
          log_runtime(f"⚠️ SQLite Error for meter {meter_id}: {db_err}")
 
-# --- MQTT CALLBACKS (Fixed to v2) ---
+# --- Smart Alert Function ---
+def check_for_alerts(data, meter_id):
+    """
+    Analyzes a data dictionary and logs alerts if thresholds are breached.
+    Only checks the real meter (ID 1).
+    """
+    if meter_id != 1:
+        return # Only check alerts for the real meter
+
+    try:
+        power = data.get('active_power_w1', 0.0)
+        voltage = data.get('voltage_v1', 230.0)
+        
+        if power > ALERT_HIGH_POWER_W:
+            log_runtime(f"🚨 CRITICAL ALERT (Meter 1): High power detected! {power:.2f} W")
+            
+        if voltage < ALERT_LOW_VOLTAGE_V:
+            log_runtime(f"⚠️ WARNING ALERT (Meter 1): Low voltage detected! {voltage:.2f} V")
+            
+    except Exception as e:
+        log_runtime(f"Error in alert checking: {e}")
+# --- End of new function ---
+
+# --- MQTT CALLBACKS ---
 def on_connect(client, userdata, flags, rc, properties):
     if rc == 0:
         log_runtime("✅ Connected to MQTT broker.")
@@ -194,7 +235,7 @@ def main():
     ser = None
     reconnect_delay = 2.0
 
-    # --- MQTT Client Setup (Fixed to v2) ---
+    # --- MQTT Client Setup ---
     mqtt_client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"smart_meter_logger_{MQTT_METER_ID}")
     mqtt_client.on_connect = on_connect
     mqtt_client.on_disconnect = on_disconnect
@@ -282,15 +323,14 @@ def main():
                     energy_wh_interval = power_w * interval_hours
                     real_data['energy_wh_interval'] = round(energy_wh_interval, 5)
 
+                    # --- Run new alert function ---
+                    check_for_alerts(real_data, 1) # Check alerts on real data
+                    # ------------------------------
+
                     # --- Live Simulation Logic ---
-                    # 1. Log the real data for Meter 1
                     log_to_local_db(real_data, 1)
-                    
-                    # 2. Simulate and log for Meter 2
                     sim_data_2 = simulate_reading(real_data, 0.8)
                     log_to_local_db(sim_data_2, 2)
-                    
-                    # 3. Simulate and log for Meter 3
                     sim_data_3 = simulate_reading(real_data, 1.2)
                     log_to_local_db(sim_data_3, 3)
                     
