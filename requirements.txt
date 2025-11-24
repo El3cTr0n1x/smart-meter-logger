@@ -8,6 +8,7 @@ paho-mqtt   # For MQTT publishing
 streamlit   # The web dashboard framework
 pandas      # For data manipulation and analytics
 plotly      # For interactive plotting
+google-generativeai # <--- NEW: For the Chatbot
 
 # --- For create_sim_database.py (Setup Script) ---
 pytz        # For timezone conversion during DB creation
