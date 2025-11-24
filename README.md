@@ -1,36 +1,36 @@
-# Smart Energy Meter Logger & Analytics Dashboard
+# Smart Energy Meter Logger & AI-Powered Dashboard
 
-This is a university project to log and analyze energy data from a physical smart meter. The system is designed to simulate a multi-meter campus environment for demonstration purposes.
+This project is a university-level implementation of a full-stack smart energy monitoring system. It logs live electrical data from a physical Modbus energy meter, simulates additional meters for scalability, stores all data locally in SQLite, and provides an interactive Streamlit dashboard for analytics. A built-in AI assistant (Gemini Text-to-SQL) enables natural-language querying of the database.
 
-The project consists of two main components:
-1. **`main.py` (Logger):** A robust Python script that reads live data from a physical Modbus meter. It logs this data as "Meter 1" and simultaneously generates live, scaled, and jittered simulated data for "Meter 2" and "Meter 3".
-2. **`analytics_dashboard.py` (Dashboard):** A Streamlit web application that reads directly from the local SQLite database. It displays live metrics, historical analytics (by weekday, by hour), and detailed power profiles for all three meters.
-
-This architecture replaces a previous, more complex system that relied on Firebase and a separate Flask API.
+The system consists of three core components:
+1. **`main.py` (Logger):** Reads real-time electrical parameters from a Modbus RTU meter, computes interval-based energy values, and logs everything into SQLite. It also generates simulated data for additional meters.
+2. **`analytics_dashboard.py` (Dashboard):** A Streamlit UI that displays live metrics, historical trends, hourly and weekday analysis, and detailed time-series plots.
+3. **`chatbot_logic.py` (AI Assistant):** Uses Google Gemini to translate natural-language questions into SQL queries, executes them locally, and returns results or visualizations.
 
 ---
 
 ## ⚡ Features
 
-* **Live Data Logging:** Connects to any serial Modbus device to read registers.  
-* **Robust Energy Calculation:** Manually calculates `energy_wh_interval` from `active_power` readings, bypassing faulty meter registers.  
-* **Live Multi-Meter Simulation:** Reads from one real meter and generates live, realistic data for two additional simulated meters.  
-* **Local-First Analytics:** All data is logged and read from a local `campus_energy_multi.db` SQLite database.  
-* **Rich Analytics Dashboard:**
-  * High-level KPI metrics (Today, This Week, This Month)
-  * Total consumption breakdown by meter
-  * Historical “Total Energy Per Day” bar chart
-  * “Day of Week” and “Hour of Day” analysis to find peak usage
-  * Detailed, zoomable power-draw graphs for any selected day
+* **Live Modbus Logging:** Reads voltage, current, power, PF, and timestamps from a hardware energy meter using RS-485.
+* **Accurate Energy Calculation:** Computes `energy_wh_interval` directly from power to bypass unreliable meter registers.
+* **Multi-Meter Support:** Simulates two additional meters for campus-scale demonstration.
+* **Local-First Database:** All data is stored and analyzed using SQLite (`campus_energy_multi.db`).
+* **AI Assistant (Text-to-SQL):** Converts English questions into SQL and answers them with real data.
+* **Interactive Analytics:**
+  * KPI metrics for Today, This Week, and This Month  
+  * Daily energy consumption charts  
+  * Hour-of-day and day-of-week usage patterns  
+  * Zoomable power-draw curves for any date  
 
 ---
 
 ## 🧠 Technology Stack
 
-* **Core:** Python 3  
+* **Language:** Python 3  
 * **Logger:** `pyserial`, `paho-mqtt`  
-* **Database:** SQLite3  
+* **Database:** SQLite3 (WAL mode enabled)  
 * **Dashboard:** `streamlit`  
+* **AI Assistant:** `google-generativeai`  
 * **Analytics:** `pandas`  
 * **Plotting:** `plotly`  
 
@@ -41,64 +41,63 @@ This architecture replaces a previous, more complex system that relied on Fireba
 ```text
 SMART_METER/
 │
-├── main.py                 # The live logger (reads from meter, simulates 2–3, logs to DB)
-├── analytics_dashboard.py  # The Streamlit analytics dashboard
-├── create_sim_database.py  # One-time script to build the DB from old data
-├── requirements.txt        # Python dependencies for the project
+├── main.py                   # Logger (reads Modbus, simulates meters, writes to DB)
+├── analytics_dashboard.py    # Streamlit dashboard
+├── chatbot_logic.py          # Text-to-SQL AI assistant
+├── create_sim_database.py    # Initializes or repairs the SQLite DB
 │
-├── .gitignore              # Ensures database files and logs are not committed
-├── campus_energy_multi.db  # The analytics database (NOT tracked by Git)
-└── log_files/              # Folder containing old 'smart_meter.db' (NOT tracked by Git)
+├── campus_energy_multi.db    # Live energy database (not tracked by Git)
+├── demo_data_v2.db           # Optional demo database
+├── requirements.txt          # Python dependencies
+└── .gitignore                # Excludes DBs, logs, and secrets
 
+```
 ---
 
 ## 🚀 How to Run
 
 ### 1. First-Time Setup
 
-1. **Clone the Repository:**
+1. **Clone the repository:**
 
-   ```bash
-   git clone https://github.com/El3cTr0n1x/smart-meter-logger.git
-   cd smart-meter-logger
-   ```
+```bash
+git clone https://github.com/El3cTr0n1x/smart-meter-logger.git
+cd smart-meter-logger
+```
 
-2. **Create a Virtual Environment:**
 
-   ```bash
-   python3 -m venv venv
-   source venv/bin/activate
-   ```
+2. **Create a virtual environment:**
 
-3. **Install Dependencies:**
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+3. **Install dependencies:**
 
-4. **Create the Database:**
+```bash
+pip install -r requirements.txt
+```
 
-   * Place your original `smart_meter.db` inside the `log_files/` folder.
-   * Run:
+4. **Create or rebuild the database:**
 
-     ```bash
-     python3 create_sim_database.py
-     ```
-   * This will generate `campus_energy_multi.db` with all historical and simulated data.
+* If you have an older smart_meter.db, place it inside log_files/ and run:
+
+```bash
+python3 create_sim_database.py
+```
+
+* This generates a fresh campus_energy_multi.db with real and simulated meter data.
 
 ---
 
 ### 2. Running the Application
 
-Run these two services in separate terminals.
-
-**Terminal 1 – Logger (connects to meter):**
+**Terminal 1 – Logger:**
 
 ```bash
 python3 main.py
 ```
-
-*Shows connection logs and records data every 5 seconds.*
 
 **Terminal 2 – Dashboard:**
 
@@ -106,42 +105,41 @@ python3 main.py
 streamlit run analytics_dashboard.py
 ```
 
-*Opens a local analytics dashboard in your browser.*
+*The dashboard will open in your browser.*
 
 ---
 
-*Updated: **2025-11-12** — Local-first analytics architecture.*
+### AI Assistant Setup
 
-````
-
----
-
-### ✅ `requirements.txt`
-
-```text
-# Python dependencies for the Smart Meter Logger & Analytics Dashboard
-
-# --- For main.py (Logger) ---
-pyserial       # For serial/Modbus communication
-paho-mqtt      # For MQTT publishing
-
-# --- For analytics_dashboard.py (Dashboard) ---
-streamlit      # Web dashboard framework
-pandas         # Data manipulation and analytics
-plotly         # Interactive plotting
-
-# --- For create_sim_database.py (Setup Script) ---
-pytz           # Timezone conversion during DB creation
-````
-
----
-
-### ✅ Commands to commit and push
+Create a Streamlit secrets file:
 
 ```bash
-git add README.md requirements.txt
-git commit -m "docs: update README and consolidate requirements"
-git push origin main
+mkdir -p .streamlit
+nano .streamlit/secrets.toml
 ```
 
+Add your Gemini API key:
+
+```bash
+GOOGLE_API_KEY = "AIzaSyD...your_key_here"
+```
+
+Restart the dashboard after saving.
+
 ---
+
+### 📈 Usage
+
+Overview Tab: Live power readings, KPI summaries, and latest sensor values.
+
+AI Assistant Tab: Ask natural-language questions such as:
+
+"Which lab consumed the most energy yesterday?"
+
+"Show voltage readings for Lab 1 today."
+
+"Compare total cost for all labs this month."
+
+Historical Analytics: Daily totals, hourly trends, and weekday patterns.
+
+Detailed Analysis: View minute-level power data for any selected date.
